@@ -2,6 +2,7 @@ import aiohttp
 import asyncio
 import argparse
 import json
+import os
 from typing import Any
 
 EVENTS_URL = "/api/spaces/{space_codename}/profiles/{profile_username}/events/"
@@ -9,6 +10,7 @@ METAGAME_DOMAIN = "https://meta-game.io"
 PER_PAGE = 50
 
 EVENTS_FILENAME = "events.json"
+RESULTS_DIR = 'results'
 
 async def paginated_request(session: aiohttp.ClientSession, url: str, headers: dict[str, str], verify_ssl: bool):
     to_timestamp = None
@@ -44,7 +46,9 @@ async def main(domain: str, token: str, space_codename: str, profile_username: s
         json_string = json.dumps(items, indent=4)
  
         # Writing to sample.json
-        with open(EVENTS_FILENAME, "w") as outfile:
+        if not os.path.exists(RESULTS_DIR):
+            os.makedirs(RESULTS_DIR)
+        with open(os.path.join(RESULTS_DIR, EVENTS_FILENAME), "w") as outfile:
             outfile.write(json_string)
 
 

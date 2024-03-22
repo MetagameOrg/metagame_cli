@@ -6,9 +6,10 @@ import os
 from typing import Any
 
 GET_EVENTS_URL = "/api/spaces/{space_codename}/profiles/{profile_username}/events/"
-CREATE_EVENTS_URL = "/api/spaces/{space_codename}/profiles/{profile_username}/create_events/"
+CREATE_EVENTS_URL = "/api/spaces/{space_codename}/profiles/{profile_username}/bulk_create_events/"
 METAGAME_DOMAIN = "https://meta-game.io"
 PER_PAGE = 50
+BATCH_SIZE = 100
 
 EVENTS_FILENAME = "events.json"
 RESULTS_DIR = 'results'
@@ -54,6 +55,12 @@ def write_profile_json(profile_username: str, space_codename: str, item_type: st
         outfile.write(json_string)
 
 
+def load_profile_json(profile_username: str, space_codename: str, item_type: str) -> list[dict[Any, Any]]:
+    filename = os.path.join(RESULTS_DIR, space_codename, profile_username, f'{item_type}.json')
+    with open(filename, 'r') as file:
+        return json.load(file)
+
+
 async def export_profile(domain: str, token: str, space_codename: str, profile_username: str, verify_ssl: bool):
 
     url = f'{domain}{GET_EVENTS_URL.format(space_codename=space_codename, profile_username=profile_username)}'
@@ -63,9 +70,36 @@ async def export_profile(domain: str, token: str, space_codename: str, profile_u
         print(f'Retrieved {len(items)} events')
         write_profile_json(profile_username, space_codename, 'events', items)
 
+EVENT_FIELDS = ['external_id', 'visibility', 'description', 'extra_data', 'created_at']
+
+
+async def send_in_batches(session: aiohttp.ClientSession, url: str, data: list[dict[Any, Any]], verify_ssl: bool):
+    batch: list[dict[Any, Any]] = []
+    for item in data:
+        batch.append(item)
+        if len(batch) == BATCH_SIZE:
+            async with session.post(url, verify_ssl=verify_ssl, json=batch) as response:
+                print(f'{response.status} {url}')
+            batch = []
+    if len(batch) > 0:
+        async with session.post(url, verify_ssl=verify_ssl, json=batch) as response:
+            print(f'{response.status} {url}')
 
 async def import_profile(domain: str, token: str, space_codename: str, profile_username: str, verify_ssl: bool):
     url = f'{domain}{CREATE_EVENTS_URL.format(space_codename=space_codename, profile_username=profile_username)}'
+    events_data = load_profile_json(profile_username, space_codename, 'events')
+    events_create_data: list[dict[Any, Any]] = []
+    headers = {'Authorization': f'Bearer {token}'}
+    async with aiohttp.ClientSession(headers=headers) as session:
+        for event in events_data:
+            data: dict[str, Any] = {k: event[k] for k in EVENT_FIELDS}
+            data['event_type_id'] = event['event_type_id']
+            data['user_id'] = event['user']['id']
+            data['profile_id'] = event['profile']['id']
+            data['location_id'] = event['location']['id'] if event['location'] else None
+            events_create_data.append(data)
+        await send_in_batches(session, url, events_create_data, verify_ssl)
+
 
 IMPORT_COMMAND = "import"
 EXPORT_COMMAND = "export"
